@@ -2,8 +2,35 @@
 #include <vector>
 #include <random>
 #include <cmath>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 using namespace std;
+
+
+double tFisica = 0;     // se inserta en MB pero se ve en B, 
+double tVirtual = 0;    // de 1.5 a 4 veces la fisica (aleatorio)
+double tPagina = 0;     // same as "fisica".
+
+int prox_min = 0;       // es el tamaño minimo por proceso
+int proc_max = 0;       // es el tamaño maximo por proceso, ambos dependen de la memoria fisica.
+
+vector<double> tProc;
+
+vector <int> dirFis;    // direccion fisica del proceso, dir del frame.
+vector <int> dirVir;    // dirección virtual del proceso, dir de la pagina.
+
+double round2d(double num){
+    return round(num*100)/100;
+}
+
+double MBround(double num){
+    double resultado = round((num/pow(2,20))*100)/100;
+    return resultado;
+}
 
 void imprimirMemorias(vector<int> fis, vector<int> vir){
     int i_fis = 0;
@@ -36,7 +63,7 @@ void imprimirMemorias(vector<int> fis, vector<int> vir){
     }
 }
 
-bool memoriaLlena(vector<int> tProc, int tVirtual){
+bool memoriaLlena(){
     int resultado = 0;
     for (size_t i = 0; i < tProc.size() ; i++){
         resultado += tProc[i];
@@ -50,35 +77,40 @@ bool memoriaLlena(vector<int> tProc, int tVirtual){
 
 }
 
-int main(){
-    float input = 0;
-    float tFisica = 0; // se inserta en MB pero se ve en B, 
-    float tVirtual = 0; // de 1.5 a 4 veces la fisica (aleatorio)
-    float tPagina = 0; // same as "fisica".
-    vector <int> tProc; // tamaño de cada proceso.
-    int rango_proc = 0; // es el tamaño maximo por proceso, depende de la memoria virtual.
-    vector <int> dirFis; // direccion fisica del proceso, dir del frame.
-    vector <int> dirVir; // dirección virtual del proceso, dir de la pagina.
+void loop_procesos() {
+    while (!memoriaLlena()) {
+        cout << "Creando proceso..." << endl;
 
+        // Espera 2 segundos o hasta que se pida detener
+        unique_lock<mutex> lk(cv_m);
+        cv.wait_for(lk, chrono::seconds(2), []{ return stopRequested.load(); });
+    }
+
+    cout << "Hilo terminado limpiamente." << endl;
+}
+
+int main(){
     //cosas para generacion de numero random
     random_device rd;
     mt19937 gen(rd());
 
-    uniform_real_distribution<> dist(1.5, 4.0);
+    uniform_real_distribution<> dist(1.5, 4.0);     // campana de gauss
+    
+    double randomN = round(dist(gen) * 100) / 100;  //redondeo manteniendo 2 decimales
 
-    double randomN = dist(gen);
-
+    
+    double input = 0;
     int mCont = 0;
     cout << "===MENÚ PRINCIPAL===" << endl;
     while (true){
         switch (mCont){
             case 0: {
-                cout << "Inserte tamaño de la memoria fisica en MB (numero natural mayor a 0): "; 
+                cout << "\nInserte tamaño de la memoria fisica en MB (numero natural mayor a 0): "; 
                 cin >> input;
                 tFisica = input * pow(2,20); // 2^20 = MB, para representarla en Bytes.
                 if(tFisica > 0){
                     tVirtual = tFisica * randomN;
-                    cout << "Su memoria virtual es: " << tVirtual << "B, " << randomN << " veces la memoria fisica." << endl;
+                    cout << "Su memoria virtual es: " << MBround(tVirtual) << "MB, " << randomN << " veces la memoria fisica." << endl;
                     mCont++;
                     continue;
                 }
@@ -90,13 +122,19 @@ int main(){
             }
             
             case 1: {
-                cout << "Inserte tamaño en MB para las paginas (menor a " << tFisica << "B, se recomienda que sean menores a 1): ";
+                cout << "\nInserte tamaño en MB para las paginas (menor a " << MBround(tFisica) << "MB, porfavor)\n(0 Para volver atrás): ";
                 cin >> input;
                 tPagina = input * pow(2,20);
                 if(tPagina > 0){
-                    rango_proc = tPagina * 3; //el tamaño maximo de los procesos es 3 paginas.
-                    cout << "Su tamaño de pagina es: " << tPagina << "MB, por lo tanto, se harán procesos de hasta " << rango_proc << "B." << endl;
+                    prox_min = tPagina * 0.2;
+                    proc_max = tPagina * 3; //el tamaño maximo de los procesos es 3 paginas.
+                    cout << "Su tamaño de pagina es: " << MBround(tPagina) << "MB. \nPor lo tanto, se harán procesos de hasta " << MBround(proc_max) << "MB y de minimo " << MBround(prox_min) << "MB." << endl;
                     mCont++;
+                    continue;
+                }
+                else if (input == 0){
+                    cout << "\nVolvió atrás...\n";
+                    mCont--
                     continue;
                 }
                 else {
@@ -105,9 +143,26 @@ int main(){
                 }
                 break;
             }
+            case 2: {
+                cout << "\nPresione ENTER para iniciar la simulacion o 0 para volver atrás.";
+                cin >> input;
+                if (input != 0){
+                    mCont++;
+                    continue;
+                }
+                else if (input == 0){
+                    cout << "\nVolvió atrás...\n";
+                    mCont--
+                    continue;
+                }
+                break;
+            }
         }
-        while(!memoriaLlena(tProc, tVirtual)){
 
+        thread generador(loop_procesos);
+
+        while(!memoriaLlena(tProc, tVirtual)){
+            
         }
     }
 
