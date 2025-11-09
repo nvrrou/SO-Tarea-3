@@ -79,14 +79,9 @@ bool memoriaLlena(){
 
 void loop_procesos() {
     while (!memoriaLlena()) {
-        cout << "Creando proceso..." << endl;
+        cout << "Creando proceso " << endl;
 
-        // Espera 2 segundos o hasta que se pida detener
-        unique_lock<mutex> lk(cv_m);
-        cv.wait_for(lk, chrono::seconds(2), []{ return stopRequested.load(); });
     }
-
-    cout << "Hilo terminado limpiamente." << endl;
 }
 
 int main(){
