@@ -19,7 +19,7 @@ vector<string> log_consultas;
 
 bool consulta_fuera_rango = false; //para que la primera consulta sea fuera de rango y probar el reemplazo.
 
-int fifo = 0;           // índice para el reemplazo FIFO.
+int fifo = -1;           // índice para el reemplazo FIFO.
 
 double tamañoFisica=0;  // tamaño de la memoria física.
 double tamañoVirtual=0; // tamaño de la memoria virtual.
@@ -117,10 +117,12 @@ void crearProceso(double tamañoProceso){
             double ocupacion = min(tamañoPagina, tamañoRestante);
             pg[i].ocupar(p.getId(), ocupacion, parte);
             
-
+            int c = 0;
             for (auto& m : marcos) {
                 if (m.isLibre()) {
                     m.ocupar(p.getId(), ocupacion, parte);
+                    c++;
+                    fifo = c;
                     break;
                 }
             }
@@ -156,6 +158,11 @@ void eliminarProceso(int idProceso){
 //función para reemplazar la marco más antigua (FIFO).
 void reemplazarMarco(int idProceso, double ocupacion, int parteProceso) {
     for (auto& m : marcos) {
+        if (m.getProcesoId() == idProceso && m.getParte() == parteProceso){
+            return;
+        }
+    }
+     for (auto& m : marcos) {
         if (m.isLibre()) {
             m.ocupar(idProceso, ocupacion, parteProceso);
             return;
@@ -180,12 +187,7 @@ void reemplazarMarco(int idProceso, double ocupacion, int parteProceso) {
             }
         }
 
-    if(fifo == 0){
-        fifo = (int)marcos.size() - 1;
-    }
-    else{
-        fifo--;
-    }
+
 }
 
 //función para generar un número aleatorio entre min y max (double, numero grande en resumen, xq está en Bytes).
@@ -458,24 +460,50 @@ void* loop_eliminador() {
 //loop para consultar direcciones cada cierto tiempo.
 void* loop_consultador(){
     this_thread::sleep_for(chrono::milliseconds(30000)); // Espera 30s antes de la primera consulta
-    fifo = (int)marcos.size() - 1; //inicializa el índice FIFO al último marco.
+    fifo = (int)marcos.size() - 1; // inicializa el índice FIFO al último marco.
+
     while (!memoria_llena() && !terminar) {
         int pagina;
         double consulta;
 
-        //la primera consulta siempre será fuera de rango para forzar el reemplazo.
+        // Primera consulta forzada fuera de rango
         if (!consulta_fuera_rango){
             consulta_fuera_rango = true;
-            consulta = tamañoFisica + (tamañoVirtual - tamañoFisica) / 2; // dirección virtual fuera de rango para forzar reemplazo, pero no es una pagina vacia (en el 90% de casos, seria mala cuea que justo se borrara esa jaja lol xd).
+            consulta = tamañoFisica + (tamañoVirtual - tamañoFisica) / 2;
             pagina = consulta / tamañoPagina;
-
         }
         else{
-            consulta = randomDouble(0, tamañoVirtual - (tamañoVirtual - tamañoPagina * paginas.size())); // dirección virtual aleatoria dentro del rango válido.
+            consulta = randomDouble(0, tamañoVirtual - (tamañoVirtual - tamañoPagina * paginas.size()));
             pagina = consulta / tamañoPagina;
         }
 
+        // Si la página consultada NO tiene proceso (-1), solo registrar y continuar
+        if (paginas[pagina].getProcesoId() == -1) {
 
+            string msg =
+                "- Consulta de dirección virtual: " +
+                to_string(consulta) +
+                "B (Página " +
+                to_string(pagina + 1) +
+                ") — Página sin proceso asignado.\n\n";
+
+            // Registrar en el log
+            {
+                ofstream archivo("consultas.log", ios::app);
+                if (archivo.is_open()) {
+                    archivo << msg << "\n";
+                }
+            }
+
+            // Mostrar en consola
+            cout << msg << "\n";
+
+            // Mantener ritmo entre consultas
+            this_thread::sleep_for(chrono::milliseconds(5000));
+            continue; // saltar a la siguiente iteración del ciclo
+        }
+
+        // Aquí continúa normalmente si sí tiene proceso asignado
         string msg = 
             "- Consulta de dirección virtual: " + 
             to_string(consulta) + 
@@ -485,35 +513,35 @@ void* loop_consultador(){
             ", parte " + to_string(paginas[pagina].getParte()) +
             ".\n";
 
-
         msg += "\nEstado de la memoria antes de la consulta:\n";
 
-        // escribe en el archivo de consultas.
         {
-            ofstream archivo("consultas.log", ios::app); // crea si no existe
-            if (archivo.is_open()) {
-                archivo << msg << "\n";
-            }
+            ofstream archivo("consultas.log", ios::app);
+            if (archivo.is_open()) archivo << msg << "\n";
         }
-        renderMSG(); // render del estado actual al archivo de consultas.
 
-        reemplazarMarco(paginas[pagina].getProcesoId(), (paginas[pagina].getUso()/100.0) * tamañoPagina, paginas[pagina].getParte());
+        renderMSG();
+
+        reemplazarMarco(
+            paginas[pagina].getProcesoId(),
+            (paginas[pagina].getUso() / 100.0) * tamañoPagina,
+            paginas[pagina].getParte()
+        );
 
         string msg1 = "\nEstado de la memoria después de la consulta:\n";
+
         {
-            ofstream archivo("consultas.log", ios::app); // crea si no existe
-            if (archivo.is_open()) {
-                archivo << msg1 << "\n";
-            }
+            ofstream archivo("consultas.log", ios::app);
+            if (archivo.is_open()) archivo << msg1 << "\n";
         }
-        this_thread::sleep_for(chrono::milliseconds(500)); // espera medio segundo antes de renderizar el estado después de la consulta.
-        renderMSG(); 
 
-        // Mostrar
-        cout << msg << "\n"; //se va a mostrar lo de estado de la memoria antes, pero no hay tiempo para corregir eso ahora. :), nadie lo verá :))))
+        renderMSG();
 
-        this_thread::sleep_for(chrono::milliseconds(4000)); // 0.2 + 4.8s entre consultas
+        cout << msg << "\n";
+
+        this_thread::sleep_for(chrono::milliseconds(5000));
     }
+
     return nullptr;
 }
 
