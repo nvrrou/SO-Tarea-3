@@ -40,25 +40,17 @@ double MBround(double num){
     return resultado;
 }
 
-
-int contPg=0; //para los ids de las paginas, al final no fue usado...
-
 //esta clase representa tanto las paginas como los marcos.
 class pagina{
     private:
-        int id;
         bool libre;
         int procesoId; //id del proceso que la ocupa, -1 si está libre.
         int parte; //parte del proceso que ocupa la página/marco.
         int uso; //porcentaje de uso.
     public:
-        pagina(): id(contPg), libre(true), procesoId(-1), uso(0), parte(-1) {
-            contPg++; 
+        pagina(): libre(true), procesoId(-1), uso(0), parte(-1) {
         } 
 
-        int getId() const {
-            return id;
-        }
         int getProcesoId() const {
             return procesoId;
         }
