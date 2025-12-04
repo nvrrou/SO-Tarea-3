@@ -354,23 +354,23 @@ void renderMSG() {
             auto &p = paginas[i];
             archivo << "| " << i+1 << " ";
 
-            if (i+1 < 9) archivo << " ";
+            if (i+1 < 10) archivo << " ";
 
             if (p.getUso() > 99)
-                archivo << "\t  | " << p.getUso() << "%     | ";
+                archivo << "\t   | " << p.getUso() << "%     | ";
             else if (p.getUso() > 9)
-                archivo << "\t  | " << p.getUso() << "%      | ";
+                archivo << "\t   | " << p.getUso() << "%      | ";
             else
-                archivo << "\t  | " << p.getUso() << "%       | ";
+                archivo << "\t   | " << p.getUso() << "%       | ";
 
             string espacioFinal = (p.getParte() == -1) ? "" : " ";
             if (p.getProcesoId() == -1) {
-                archivo << p.getProcesoId() << ", " << p.getParte() << espacioFinal << "   |";
+                archivo << p.getProcesoId() << ", " << p.getParte() << espacioFinal << "  |";
             } 
             else if (p.getProcesoId()+1 > 9) {
-                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "   |";
+                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "  |";
             } else {
-                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "    |";
+                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "   |";
             }
 
         } else {
@@ -383,24 +383,24 @@ void renderMSG() {
         if (i < marcos.size()) {
             auto &m = marcos[i];
             archivo << "| " << i+1;
-            if (i+1 < 9) archivo << " ";
+            if (i+1 < 10) archivo << " ";
 
             if (m.getUso() > 99)
-                archivo << "\t  | " << m.getUso() << "%     | ";
+                archivo << "       | " << m.getUso() << "%     | ";
             else if (m.getUso() > 9)
-                archivo << "\t  | " << m.getUso() << "%      | ";
+                archivo << "       | " << m.getUso() << "%      | ";
             else
-                archivo << "\t  | " << m.getUso() << "%       | ";
+                archivo << "       | " << m.getUso() << "%       | ";
 
             string espacioFinal = (m.getParte() == -1) ? "" : " ";
 
             if (m.getProcesoId() == -1) {
-                archivo << m.getProcesoId() << ", " << m.getParte() << espacioFinal << "   |";
+                archivo << m.getProcesoId() << ", " << m.getParte() << espacioFinal << "  |";
             } 
             else if (m.getProcesoId() + 1 > 9) {
-                archivo << m.getProcesoId() + 1  << ", " << m.getParte() << espacioFinal << "   |";
+                archivo << m.getProcesoId() + 1  << ", " << m.getParte() << espacioFinal << "  |";
             } else {
-                archivo << m.getProcesoId() + 1 << ", " << m.getParte() << espacioFinal + "    |";
+                archivo << m.getProcesoId() + 1 << ", " << m.getParte() << espacioFinal + "   |";
             }
 
         } else {
@@ -442,7 +442,18 @@ void* loop_eliminador() {
     this_thread::sleep_for(chrono::milliseconds(30000)); // Espera 30 segundos antes de eliminar
     while (!memoria_llena() && !terminar) {
         if (!paginas.empty()) {
-            int idProceso = paginas[rand() % paginas.size()].getProcesoId(); // Selecciona un proceso aleatorio.
+            int idProceso;
+            if (!consulta_fuera_rango){
+                int consulta = tamañoFisica + (tamañoVirtual - tamañoFisica) / 3; // dirección virtual fuera de rango, pero distinta de la q se va a consultar para forzar reemplazo.
+                int pagina = consulta / tamañoPagina;
+                idProceso = paginas[pagina].getProcesoId(); 
+
+            } 
+            //luego si es aleatorio.
+            else{
+                idProceso = paginas[rand() % paginas.size()].getProcesoId(); // Selecciona un proceso aleatorio.
+            }
+             
             if (idProceso != -1) { // Asegura que el proceso exista.
                 eliminarProceso(idProceso);
             }
@@ -556,7 +567,6 @@ int main() {
                     setPaginas();
                     render();
                     cout<<  "Inicializando páginas y marcos..." << endl;
-                    cout << marcos.size() - 1;
                     mCont++;
                     continue;
                 }
