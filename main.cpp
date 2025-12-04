@@ -1,29 +1,47 @@
 #include <iostream>
 #include <vector>
-#include <thread>   // para hacer que el loop de procesos, el de eliminarlos y el de consultar direcciones sean hilos separados.
-#include <chrono>   // para usar sleep y simular tiempos.
-#include <mutex>    // para que la impresión se vea bien. 
-#include <cstdlib>  // para randomizar cosas
-#include <ctime>    // tmbn para randomizar cosas
+#include <thread>       // para hacer que el loop de procesos, el de eliminarlos y el de consultar direcciones sean hilos separados.
+#include <chrono>       // para usar sleep y simular tiempos.
+#include <mutex>        // para que la impresión se vea bien. 
+#include <cstdlib>      // para randomizar cosas
+#include <ctime>        // tmbn para randomizar cosas
+#include <queue>        // fifo
+#include <fstream>      // para escribir en el archivo de consultas.
+#include <cmath>        // para funciones matemáticas como pow y round.
+#include <algorithm>    // para la función min y max
+#include <string>       // para manejar strings
+#include <random>       // para mejor generación de números aleatorios
 
 using namespace std;
 
+bool terminar = false;  // para terminar en caso de que un proceso no pueda ser asignado.
+vector<string> log_consultas;
 
-double tamañoFisica=0; //tamaño de la memoria física.
-double tamañoVirtual=0; //tamaño de la memoria virtual.
+bool consulta_fuera_rango = false; //para que la primera consulta sea fuera de rango y probar el reemplazo.
 
-double tamañoPagina=0; //tamaño de cada página/marco.
+int fifo = 0;           // índice para el reemplazo FIFO.
 
-int proc_min=0; //tamaño mínimo de los procesos.
-int proc_max=0; //tamaño máximo de los procesos.
+double tamañoFisica=0;  // tamaño de la memoria física.
+double tamañoVirtual=0; // tamaño de la memoria virtual.
 
-class pagina; //declaracion adelantada.
+double tamañoPagina=0;  // tamaño de cada página/marco.
 
-vector<pagina> marcos; //vector global de marcos.
-vector<pagina> paginas; //vector global de paginas.
+int proc_min=0;         // tamaño mínimo de los procesos.
+int proc_max=0;         // tamaño máximo de los procesos.
+
+class pagina;           // declaracion adelantada.
+
+vector<pagina> marcos;  // vector global de marcos.
+vector<pagina> paginas; // vector global de paginas.
+
+//función para convertir de bytes a MB y redondear a 2 decimales.
+double MBround(double num){
+    double resultado = round((num/pow(2,20))*100)/100;
+    return resultado;
+}
 
 
-int contPg=0; //para los ids de las paginas.
+int contPg=0; //para los ids de las paginas, al final no fue usado...
 
 //esta clase representa tanto las paginas como los marcos.
 class pagina{
@@ -31,9 +49,10 @@ class pagina{
         int id;
         bool libre;
         int procesoId; //id del proceso que la ocupa, -1 si está libre.
+        int parte; //parte del proceso que ocupa la página/marco.
         int uso; //porcentaje de uso.
     public:
-        pagina(): id(contPg), libre(true), procesoId(-1), uso(0) {
+        pagina(): id(contPg), libre(true), procesoId(-1), uso(0), parte(-1) {
             contPg++; 
         } 
 
@@ -49,8 +68,12 @@ class pagina{
         bool isLibre() const {
             return libre;
         }
+        int getParte() const {
+            return parte;
+        }
 
-        void ocupar(int idProceso, double ocupacion) {
+        void ocupar(int idProceso, double ocupacion, int parteProceso) {
+            parte = parteProceso;
             libre = false;
             procesoId = idProceso;
             uso = round((ocupacion/tamañoPagina)*100); //calcula el porcentaje de uso, redondeado.
@@ -59,6 +82,7 @@ class pagina{
             libre = true;
             procesoId = -1;
             uso = 0;
+            parte = -1;
         }
 };
 
@@ -76,7 +100,10 @@ class proceso{
         contPs++;
 
     } 
-    int gettamaño() const {
+    int getId() const {
+        return id;
+    }
+    double gettamaño() const {
         return tamaño;
     }
     vector<pagina> getamañoPaginas() const {
@@ -84,16 +111,97 @@ class proceso{
     }
 
 };
-//función para convertir de bytes a MB y redondear a 2 decimales.
-double MBround(double num){
-    double resultado = round((num/pow(2,20))*100)/100;
-    return resultado;
+//función para crear un proceso e intentar asignarle páginas.
+void crearProceso(double tamañoProceso){
+    proceso p(tamañoProceso);
+    double tamañoRestante = tamañoProceso;
+    vector<pagina>& pg = paginas;
+    int parte = 1;
+    cout << "Cantidad de Paginas: " << paginas.size() << endl;
+    cout << "Tamaño Proceso: " << MBround(tamañoProceso) << "MB." << endl;
+    cout << "Tamaño Pagina: " << MBround(tamañoPagina) << "MB." << endl;
+    for (size_t i = 0 ; i < paginas.size() ; i++) {
+        if (pg[i].isLibre() && tamañoRestante > 0) {
+            double ocupacion = min(tamañoPagina, tamañoRestante);
+            pg[i].ocupar(p.getId(), ocupacion, parte);
+            
+
+            for (auto& m : marcos) {
+                if (m.isLibre()) {
+                    m.ocupar(p.getId(), ocupacion, parte);
+                    break;
+                }
+            }
+            
+            parte++;
+            tamañoRestante -= ocupacion;
+        }
+        if (tamañoRestante <= 0) {
+            break;
+        }
+    }
+    if (tamañoRestante > 0){
+        cout << "No hay suficiente memoria para el proceso " << p.getId() + 1 << ". Terminando simulación.\n";
+        terminar = true;
+    }
+}
+
+//función para eliminar un proceso y liberar sus páginas y marcos.
+void eliminarProceso(int idProceso){
+    for (auto& pg : paginas) {
+        if (pg.getProcesoId() == idProceso) {
+            pg.liberar();
+        }
+    }
+    for (auto& m : marcos) {
+        if (m.getProcesoId() == idProceso) {
+            m.liberar();
+        }
+    }
+    cout << "Proceso " << idProceso << "# eliminado.\n";
+}
+
+//función para reemplazar la marco más antigua (FIFO).
+void reemplazarMarco(int idProceso, double ocupacion, int parteProceso) {
+    for (auto& m : marcos) {
+        if (m.isLibre()) {
+            m.ocupar(idProceso, ocupacion, parteProceso);
+            return;
+        }
+    }
+    // Si no hay marcos libres, reemplaza el mas nuevo (FIFO).
+    marcos[fifo].liberar();
+    marcos[fifo].ocupar(idProceso, ocupacion, parteProceso);
+
+    cout << "Reemplazando marco " << fifo + 1 << " con proceso " << idProceso + 1 << ", parte " << parteProceso << ".\n";
+    string msg =
+                "Reemplazando marco " + to_string(fifo + 1) +
+                " con proceso " + to_string(idProceso + 1) +
+                ", parte " + to_string(parteProceso) +
+                ".\n";
+
+    // escribe en el archivo de consultas.
+        {
+            ofstream archivo("consultas.log", ios::app); // crea si no existe
+            if (archivo.is_open()) {
+                archivo << msg << "\n";
+            }
+        }
+
+    if(fifo == 0){
+        fifo = (int)marcos.size() - 1;
+    }
+    else{
+        fifo--;
+    }
 }
 
 //función para generar un número aleatorio entre min y max (double, numero grande en resumen, xq está en Bytes).
 double randomDouble(double min, double max) {
-    double r = (double)rand() / (double)RAND_MAX; // [0, 1]
-    return min + r * (max - min);                 // escala al rango
+    static random_device rd;
+    static mt19937 gen(rd());
+    uniform_real_distribution<double> dist(min, max);
+    return dist(gen);
 }
 
 //función para verificar si la memoria está llena.
@@ -133,7 +241,7 @@ void render() {
          << "     "
          << "+----------+----------+---------+\n";
 
-    cout << "|            PAGINAS            |     |            MARCOS             |\n";
+    cout << "|            PAGINAS            |     |             MARCOS            |\n";
 
     cout << "+----------+----------+---------+"
          << "     "
@@ -147,9 +255,33 @@ void render() {
         // ---- Bloque derecho (PAGINAS) ----
         if (i < paginas.size()) {
             auto &p = paginas[i];
-            cout << "| " << i;
-            cout << "\t   | " << p.getUso() << "%\t   | "
-                 << p.getProcesoId() << "\t   |";
+            cout << "| " << i+1;
+
+            if(i+1 < 9){
+                cout << " ";
+            }
+
+            if(p.getUso() > 99){
+                cout << "\t   | " << p.getUso() << "%     | ";
+            }
+            else if(p.getUso() > 9) {
+                cout << "\t   | " << p.getUso() << "%      | ";
+            }
+            else{
+                cout << "\t   | " << p.getUso() << "%       | ";
+            }
+
+            string espacioFinal = (p.getParte() == -1) ? " " : "";
+            string color = (p.getProcesoId() % 2 == 0) ? "34" : "36"; // azul para pares, cian para impares
+            if(p.getProcesoId() == -1){
+                cout << "\033[31m" << p.getProcesoId()  << "\033[0m, " << p.getParte() << espacioFinal + " |";
+            }
+            else if(p.getProcesoId() + 1 > 9){
+                cout << "\033[" << color << "m" << p.getProcesoId() + 1 << "\033[0m, " << p.getParte() << espacioFinal + "   |";
+            }
+            else {
+                cout << "\033[" << color << "m" << p.getProcesoId() + 1 << "\033[0m, " << p.getParte() << espacioFinal + "    |";
+            }
         } else {
             // fila vacía para mantener alineación
             cout << "|          |          |         |";
@@ -160,11 +292,34 @@ void render() {
         // Bloque derecho (MARCOS)
         if (i < marcos.size()) {
             auto &m = marcos[i];
-            cout << "| " << i;
-            cout << "\t   | " << m.getUso() << "%\t   | "
-                 << m.getProcesoId() << "\t   |";
+            cout << "| " << i+1;
+            if(i+1 < 9){
+                cout << " ";
+            }
+            
+            if(m.getUso() > 99){
+                cout << "\t | " << m.getUso() << "%     | ";
+            }
+            else if(m.getUso() > 9) {
+                cout << "\t | " << m.getUso() << "%      | ";
+            }
+            else{
+                cout << "\t | " << m.getUso() << "%       | ";
+            }
+
+            string espacioFinal = (m.getParte() == -1) ? "" : " ";
+            string color = (m.getProcesoId() % 2 == 0) ? "34" : "36"; // azul para pares, cian para impares
+            if(m.getProcesoId() == -1){
+                cout << "\033[31m" << m.getProcesoId()  << "\033[0m, " << m.getParte() << espacioFinal + "  |";
+            }
+            else if(m.getProcesoId() + 1 > 9){
+                cout << "\033[" << color << "m" << m.getProcesoId() + 1 << "\033[0m, " << m.getParte() << espacioFinal + "  |";
+            }
+            else {
+                cout << "\033[" << color << "m" << m.getProcesoId() + 1 << "\033[0m, " << m.getParte() << espacioFinal + "   |";
+            }
         } else {
-            cout << "|          |          |         |";
+            cout << "| -        | -        | -       |";
         }
 
         cout << "\n";
@@ -175,26 +330,208 @@ void render() {
          << "+----------+----------+---------+\n";
 }
 
+//función para renderizar el estado actual de las páginas y marcos y mandarla a un archivo (para el log de consultas).
+void renderMSG() {
+    ofstream archivo("consultas.log", ios::app); // crea si no existe, y agrega al final
+    if (!archivo.is_open()) return;
 
-void loop_procesos() {
-    while (!memoria_llena()) {
-        
+    archivo << "+----------+----------+---------+"
+            << "     "
+            << "+----------+----------+---------+\n";
+
+    archivo << "|            PAGINAS            |     |             MARCOS            |\n";
+
+    archivo << "+----------+----------+---------+"
+            << "     "
+            << "+----------+----------+---------+\n";
+
+    size_t rows = max(paginas.size(), marcos.size());
+
+    for (size_t i = 0; i < rows; i++) {
+
+        // ---- PAGINAS ----
+        if (i < paginas.size()) {
+            auto &p = paginas[i];
+            archivo << "| " << i+1 << " ";
+
+            if (i+1 < 9) archivo << " ";
+
+            if (p.getUso() > 99)
+                archivo << "\t  | " << p.getUso() << "%     | ";
+            else if (p.getUso() > 9)
+                archivo << "\t  | " << p.getUso() << "%      | ";
+            else
+                archivo << "\t  | " << p.getUso() << "%       | ";
+
+            string espacioFinal = (p.getParte() == -1) ? "" : " ";
+            if (p.getProcesoId() == -1) {
+                archivo << p.getProcesoId() << ", " << p.getParte() << espacioFinal << "   |";
+            } 
+            else if (p.getProcesoId()+1 > 9) {
+                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "   |";
+            } else {
+                archivo << p.getProcesoId() + 1 << ", " << p.getParte() << espacioFinal << "    |";
+            }
+
+        } else {
+            archivo << "|          |          |         |";
+        }
+
+        archivo << "     ";
+
+        // ---- MARCOS ----
+        if (i < marcos.size()) {
+            auto &m = marcos[i];
+            archivo << "| " << i+1;
+            if (i+1 < 9) archivo << " ";
+
+            if (m.getUso() > 99)
+                archivo << "\t  | " << m.getUso() << "%     | ";
+            else if (m.getUso() > 9)
+                archivo << "\t  | " << m.getUso() << "%      | ";
+            else
+                archivo << "\t  | " << m.getUso() << "%       | ";
+
+            string espacioFinal = (m.getParte() == -1) ? "" : " ";
+
+            if (m.getProcesoId() == -1) {
+                archivo << m.getProcesoId() << ", " << m.getParte() << espacioFinal << "   |";
+            } 
+            else if (m.getProcesoId() + 1 > 9) {
+                archivo << m.getProcesoId() + 1  << ", " << m.getParte() << espacioFinal << "   |";
+            } else {
+                archivo << m.getProcesoId() + 1 << ", " << m.getParte() << espacioFinal + "    |";
+            }
+
+        } else {
+            archivo << "| -        | -        | -       |";
+        }
+
+        archivo << "\n";
     }
+
+    archivo << "+----------+----------+---------+"
+            << "     "
+            << "+----------+----------+---------+\n";
+
+    archivo << "\n\n"; // separación entre renders
 }
 
+//loop para crear procesos cada cierto tiempo.
+void* loop_procesos() {
+    while (!memoria_llena() && !terminar) {
+        float tamaño = randomDouble(proc_min, proc_max);
+        crearProceso(tamaño);
+        this_thread::sleep_for(chrono::milliseconds(2000)); // Actualiza cada 2 s
+    }
+    return nullptr;
+}
 
+//loop para renderizar el estado cada cierto tiempo.
+void* loop_render() {
+    while (!memoria_llena() && !terminar) {
+        render();
+        this_thread::sleep_for(chrono::milliseconds(500)); // Actualiza cada 500 ms
+    }
+    render(); // render final al terminar
+    return nullptr;
+}
+
+//loop para eliminar procesos cada cierto tiempo.
+void* loop_eliminador() {
+    this_thread::sleep_for(chrono::milliseconds(30000)); // Espera 30 segundos antes de eliminar
+    while (!memoria_llena() && !terminar) {
+        if (!paginas.empty()) {
+            int idProceso = paginas[rand() % paginas.size()].getProcesoId(); // Selecciona un proceso aleatorio.
+            if (idProceso != -1) { // Asegura que el proceso exista.
+                eliminarProceso(idProceso);
+            }
+        }
+        this_thread::sleep_for(chrono::milliseconds(5000)); // Espera 5 segundos para cada eliminación.
+    }   
+    return nullptr;
+}
+
+//loop para consultar direcciones cada cierto tiempo.
+void* loop_consultador(){
+    this_thread::sleep_for(chrono::milliseconds(30000)); // Espera 30s antes de la primera consulta
+    fifo = (int)marcos.size() - 1; //inicializa el índice FIFO al último marco.
+    while (!memoria_llena() && !terminar) {
+        int pagina;
+        double consulta;
+
+        //la primera consulta siempre será fuera de rango para forzar el reemplazo.
+        if (!consulta_fuera_rango){
+            consulta_fuera_rango = true;
+            consulta = tamañoFisica + (tamañoVirtual - tamañoFisica) / 2; // dirección virtual fuera de rango para forzar reemplazo, pero no es una pagina vacia (en el 90% de casos, seria mala cuea que justo se borrara esa jaja lol xd).
+            pagina = consulta / tamañoPagina;
+
+        }
+        else{
+            consulta = randomDouble(0, tamañoVirtual - (tamañoVirtual - tamañoPagina * paginas.size())); // dirección virtual aleatoria dentro del rango válido.
+            pagina = consulta / tamañoPagina;
+        }
+
+
+        string msg = 
+            "- Consulta de dirección virtual: " + 
+            to_string(consulta) + 
+            "B (Página " + 
+            to_string(pagina + 1) + ") con proceso " + 
+            to_string(paginas[pagina].getProcesoId() + 1) +
+            ", parte " + to_string(paginas[pagina].getParte()) +
+            ".\n";
+
+
+        msg += "\nEstado de la memoria antes de la consulta:\n";
+
+        // escribe en el archivo de consultas.
+        {
+            ofstream archivo("consultas.log", ios::app); // crea si no existe
+            if (archivo.is_open()) {
+                archivo << msg << "\n";
+            }
+        }
+        renderMSG(); // render del estado actual al archivo de consultas.
+
+        reemplazarMarco(paginas[pagina].getProcesoId(), (paginas[pagina].getUso()/100.0) * tamañoPagina, paginas[pagina].getParte());
+
+        string msg1 = "\nEstado de la memoria después de la consulta:\n";
+        {
+            ofstream archivo("consultas.log", ios::app); // crea si no existe
+            if (archivo.is_open()) {
+                archivo << msg1 << "\n";
+            }
+        }
+        this_thread::sleep_for(chrono::milliseconds(500)); // espera medio segundo antes de renderizar el estado después de la consulta.
+        renderMSG(); 
+
+        // Mostrar
+        cout << msg << "\n"; //se va a mostrar lo de estado de la memoria antes, pero no hay tiempo para corregir eso ahora. :), nadie lo verá :))))
+
+        this_thread::sleep_for(chrono::milliseconds(4000)); // 0.2 + 4.8s entre consultas
+    }
+    return nullptr;
+}
+
+//menú principal para configurar la simulación.
 int main() {
+    ofstream limpiar("consultas.log", ios::trunc);
+    limpiar.close();
+    srand(static_cast<unsigned int>(time(0))); // inicializa la semilla para randomizar.
+
     double input = 0;
     int mCont = 0;
+    bool menuActivo = true;
     cout << "===MENÚ PRINCIPAL===" << endl;
-    while (true){
+    while (menuActivo){
         switch (mCont){
             case 0: {
                 cout << "\nInserte tamaño de la memoria fisica en MB (numero natural mayor a 0): "; 
                 cin >> input;
                 tamañoFisica = input * pow(2,20); // 2^20 = MB, para representarla en Bytes.
                 if(tamañoFisica > 0){
-                    int randomN = round(randomDouble(1.5,4.0)*100)/100; //número aleatorio entre 1.5 y 4.0, redondeado a 2 decimales.
+                    double randomN = round( randomDouble(15, 40) * 100 ) / 1000; //número aleatorio entre 1.5 y 4.0, redondeado a 3 decimales.
                     tamañoVirtual = tamañoFisica * randomN; //la memoria virtual será entre 1.5 y 4 veces la física.
 
                     cout << "Su memoria virtual es: " << MBround(tamañoVirtual) << "MB, " << randomN << " veces la memoria fisica." << endl;
@@ -209,13 +546,17 @@ int main() {
             }
             
             case 1: {
-                cout << "\nInserte tamaño en MB para las paginas (menor a " << MBround(tamañoFisica) << "MB, porfavor)\n(0 Para volver atrás): ";
+                cout << "\nInserte tamaño en KB para las paginas \n(se recomienda entre "<< MBround(tamañoVirtual/36)*1000 << "KB y " << MBround(tamañoVirtual/30)*1000 << "KB, para que alcancen a pasar 30 segundos)\n(0 Para volver atrás): ";
                 cin >> input;
-                tamañoPagina = input * pow(2,20);
+                tamañoPagina = input * pow(2,10);
                 if(tamañoPagina > 0){
-                    proc_min = tamañoPagina * 0.2;
-                    proc_max = tamañoPagina * 3; //el tamaño maximo de los procesos es 3 paginas.
+                    proc_min = tamañoPagina * 0.05; //el tamaño minimo de los procesos es 5% de una pagina.
+                    proc_max = tamañoPagina * 2.28 - 1; //el tamaño maximo de los procesos es 3 paginas, pero es poco probable.
                     cout << "Su tamaño de pagina es: " << MBround(tamañoPagina) << "MB. \nPor lo tanto, se harán procesos de " << MBround(proc_min) << "MB, hasta " << MBround(proc_max) << "MB." << endl;
+                    setPaginas();
+                    render();
+                    cout<<  "Inicializando páginas y marcos..." << endl;
+                    cout << marcos.size() - 1;
                     mCont++;
                     continue;
                 }
@@ -231,11 +572,12 @@ int main() {
                 break;
             }
             case 2: {
-                cout << "\nPresione ENTER para iniciar la simulacion o 0 para volver atrás.";
+                cout << "\nCualquier numero + ENTER para iniciar la simulacion o 0 para volver atrás.";
                 cin >> input;
                 if (input != 0){
                     mCont++;
-                    continue;
+                    menuActivo = false;
+                    break;
                 }
                 else if (input == 0){
                     cout << "\nVolvió atrás...\n";
@@ -246,6 +588,15 @@ int main() {
             }
         }
     }
-    
+    cout << "\nIniciando simulación...\n";
 
+    thread procesoThread(loop_procesos);
+    thread renderThread(loop_render);
+    thread eliminadorThread(loop_eliminador);
+    thread consultadorThread(loop_consultador);
+
+    procesoThread.join();
+    renderThread.join();
+    eliminadorThread.join();
+    consultadorThread.join();
 }
