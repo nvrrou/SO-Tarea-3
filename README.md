@@ -1,9 +1,10 @@
 # SO-Tarea-3
 María de los Ángeles y Cristóbal Navarro
+LINK AL REPOSITORIO (se ve mejor el readme ahi...): https://github.com/nvrrou/SO-Tarea-3
 
 # Ejecución
 1. Situarse en la carpeta donde esta el main
-2. Usar el siguiente comando "g++ -std=c++11 main.cpp -o main
+2. Usar el siguiente comando "g++ -std=c++11 main.cpp -o main"
 3. Ejecutar usando ./main
 4. Introducir tamaño de la memoria fisica
 5. Introducir tamaño de las paginas
